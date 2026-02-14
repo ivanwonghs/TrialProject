@@ -1,329 +1,191 @@
-
-#!/usr/bin/env python3
-"""
-Funnay Dodge - single-file terminal game (pure Python, no external libs)
-
-Controls:
- - a / A / left-arrow  : move left
- - d / D / right-arrow : move right
- - s / S               : stay (no movement)
- - p / P               : pause/unpause
- - q / Q               : quit
-
-Goal:
- - Catch goodies 'o' to gain points.
- - Dodge hazards 'X' (lose a life if hit).
- - Survive as long as possible. Difficulty increases over time.
-
-Notes:
- - Works in standard POSIX terminals (Linux / macOS).
- - On Windows, it uses msvcrt for input.
- - No curses dependency; simple drawing with ANSI escape codes.
-"""
-
-import sys
-import time
-import random
-import threading
-
 import streamlit as st
-
 st.write("ISOM5240")
 
+# Funnay Dodge - Streamlit edition (single file)
+# Playable turn-based / simple animated game inside Streamlit.
+# - Use the Left / Right buttons to move the player (P)
+# - Press "Step" to advance one tick, or "Auto Play" to run a short automated run.
+# - Catch goodies 'o' to score. Avoid hazards 'X' (lose a life if they reach you).
+# Works fully within Streamlit (no terminal required).
 
-# Platform-specific single-key input
-IS_WIN = sys.platform.startswith("win")
+import random
+import time
 
-if IS_WIN:
-    import msvcrt
-
-    def get_char_blocking(timeout=None):
-        start = time.time()
-        while True:
-            if msvcrt.kbhit():
-                ch = msvcrt.getwch()
-                return ch
-            if timeout is not None and (time.time() - start) >= timeout:
-                return None
-            time.sleep(0.01)
-else:
-    import tty
-    import termios
-    import select
-
-    def get_char_blocking(timeout=None):
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setcbreak(fd)
-            if timeout is None:
-                r, _, _ = select.select([fd], [], [])
-            else:
-                r, _, _ = select.select([fd], [], [], timeout)
-            if r:
-                ch = sys.stdin.read(1)
-                # handle escape sequences for arrows
-                if ch == "\x1b":
-                    # try to read two more chars if available quickly
-                    r2, _, _ = select.select([fd], [], [], 0.02)
-                    if r2:
-                        ch2 = sys.stdin.read(1)
-                        ch3 = sys.stdin.read(1) if select.select([fd], [], [], 0.02)[0] else ""
-                        return ch + ch2 + ch3
-                return ch
-            return None
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-# Terminal helpers
-ESC = "\x1b"
-CSI = ESC + "["
-
-def clear_screen():
-    sys.stdout.write(CSI + "2J" + CSI + "H")
-    sys.stdout.flush()
-
-def hide_cursor():
-    sys.stdout.write(CSI + "?25l")
-    sys.stdout.flush()
-
-def show_cursor():
-    sys.stdout.write(CSI + "?25h")
-    sys.stdout.flush()
-
-def move_to(r, c):
-    sys.stdout.write(f"{CSI}{r};{c}H")
-
-def get_terminal_size():
-    try:
-        import shutil
-        cols, lines = shutil.get_terminal_size((80, 24))
-        return max(40, cols), max(10, lines)
-    except Exception:
-        return 80, 24
-
-# Game constants
-WIDTH, HEIGHT = get_terminal_size()
-PLAY_H = max(10, HEIGHT - 6)
-PLAY_W = min(80, max(40, WIDTH - 4))
-FPS = 12
-TICK = 1.0 / FPS
-
-# Symbols
+# --- Game parameters ---
+PLAY_W = 24
+PLAY_H = 12
 PLAYER_CHAR = "P"
 HAZARD_CHAR = "X"
 GOOD_CHAR = "o"
 EMPTY_CHAR = " "
 
-# Game state
-lock = threading.Lock()
-player_x = PLAY_W // 2
-score = 0
-lives = 3
-level = 1
-running = True
-paused = False
-objects = []  # each is dict: {'x':int,'y':int,'ch':str,'speed':float,'acc':float}
-spawn_timer = 0.0
-spawn_interval = 0.9
+# initialize session state
+if "score" not in st.session_state:
+    st.session_state.score = 0
+if "lives" not in st.session_state:
+    st.session_state.lives = 3
+if "player_x" not in st.session_state:
+    st.session_state.player_x = PLAY_W // 2
+if "objects" not in st.session_state:
+    st.session_state.objects = []  # list of dicts: x,y,ch
+if "running" not in st.session_state:
+    st.session_state.running = True
+if "auto" not in st.session_state:
+    st.session_state.auto = False
+if "tick_count" not in st.session_state:
+    st.session_state.tick_count = 0
 
-# Input state
-last_input = None
+st.sidebar.title("Controls")
+if st.sidebar.button("Reset Game"):
+    st.session_state.score = 0
+    st.session_state.lives = 3
+    st.session_state.player_x = PLAY_W // 2
+    st.session_state.objects = []
+    st.session_state.running = True
+    st.session_state.tick_count = 0
 
-def clamp_int(v, a, b):
-    return max(a, min(b, v))
+col1, col2, col3 = st.sidebar.columns(3)
+if col1.button("⭠ Left"):
+    st.session_state.player_x = max(1, st.session_state.player_x - 1)
+if col3.button("Right ⭢"):
+    st.session_state.player_x = min(PLAY_W, st.session_state.player_x + 1)
 
-def reset_game():
-    global player_x, score, lives, level, objects, spawn_timer, spawn_interval, running, paused
-    with lock:
-        player_x = PLAY_W // 2
-        score = 0
-        lives = 3
-        level = 1
-        objects = []
-        spawn_timer = 0.0
-        spawn_interval = 0.9
-        running = True
-        paused = False
+if col2.button("Step"):
+    # advance one tick
+    st.session_state.tick_count += 1
 
-# Input thread
-def input_thread():
-    global last_input, running, paused
-    try:
-        while running:
-            ch = get_char_blocking(timeout=0.08)
-            if not ch:
-                continue
-            # normalize arrow keys and letters
-            if ch in ("\x1b[D", "\x1bOD"):  # left arrow
-                last_input = "LEFT"
-            elif ch in ("\x1b[C", "\x1bOC"):  # right arrow
-                last_input = "RIGHT"
-            else:
-                c = ch.lower()
-                if c == "a":
-                    last_input = "LEFT"
-                elif c == "d":
-                    last_input = "RIGHT"
-                elif c == "s":
-                    last_input = "STAY"
-                elif c == "p":
-                    paused = not paused
-                elif c == "q":
-                    running = False
-                    break
-                else:
-                    last_input = None
-    except Exception:
-        running = False
+auto_toggle = st.sidebar.checkbox("Auto Play (short)", value=False)
+st.session_state.auto = auto_toggle
 
+st.sidebar.markdown("Rules: Catch 'o' to gain +3. If 'X' reaches you, you lose 1 life.")
+st.sidebar.markdown("Goal: Survive and score as much as you can!")
+
+# spawn logic
 def spawn_object():
-    # spawn either hazard or good object at top row (y=1)
-    typ = random.random()
-    if typ < 0.18:
+    if random.random() < 0.18:
         ch = GOOD_CHAR
-        speed = random.uniform(0.35, 0.7)
     else:
         ch = HAZARD_CHAR
-        speed = random.uniform(0.45, 0.95)
-    x = random.randint(1, PLAY_W-2)
-    obj = {"x": x, "y": 1, "ch": ch, "speed": speed, "acc": 0.0}
-    objects.append(obj)
+    x = random.randint(1, PLAY_W)
+    st.session_state.objects.append({"x": x, "y": 1, "ch": ch})
 
-def update_game(dt):
-    global spawn_timer, spawn_interval, level, score, lives, running
-    if paused:
+def step_game():
+    if not st.session_state.running:
         return
-    spawn_timer += dt
-    # spawn more often with level
-    if spawn_timer >= spawn_interval:
-        spawn_timer = 0.0
+    st.session_state.tick_count += 1
+    # spawn occasionally
+    if random.random() < 0.6:
         spawn_object()
-    # gently increase difficulty with score/time
-    level = 1 + score // 10
-    spawn_interval = max(0.25, 0.9 - (level-1)*0.06)
-    # update objects
-    remove = []
-    for obj in list(objects):
-        obj["acc"] += obj["speed"] * dt * 60  # scale by tick rate
-        if obj["acc"] >= 1.0:
-            step = int(obj["acc"])
-            obj["y"] += step
-            obj["acc"] -= step
-        # collision with player?
-        if obj["y"] >= PLAY_H:
-            if abs(obj["x"] - player_x) <= 0:
-                # hit player
+    # move objects down
+    new_objs = []
+    for obj in st.session_state.objects:
+        obj["y"] += 1
+        if obj["y"] > PLAY_H:
+            # reached bottom: check collision with player
+            if abs(obj["x"] - st.session_state.player_x) <= 0:
                 if obj["ch"] == HAZARD_CHAR:
-                    lives -= 1
+                    st.session_state.lives -= 1
                 else:
-                    score += 3
-            else:
-                # missed: hazards disappear; goodies fall past
-                pass
-            remove.append(obj)
-    for r in remove:
-        if r in objects:
-            objects.remove(r)
-    # check lose
-    if lives <= 0:
-        running = False
-
-def render():
-    # draw frame
-    move_to(1,1)
-    sys.stdout.write("\n")  # ensure top-left
-    # top status
-    sys.stdout.write(f" Funnay Dodge — Score: {score}   Lives: {lives}   Level: {level}    (A/D or ←/→ to move, S to stay, P pause, Q quit)\n")
-    # playfield border
-    sys.stdout.write("+" + "-" * PLAY_W + "+\n")
-    # build rows
-    grid = [[EMPTY_CHAR for _ in range(PLAY_W)] for _ in range(PLAY_H)]
-    # place objects
-    for obj in objects:
-        x = int(obj["x"]-1)
-        y = int(obj["y"]-1)
-        if 0 <= y < PLAY_H and 0 <= x < PLAY_W:
-            grid[y][x] = obj["ch"]
-    # place player on bottom row
-    py = PLAY_H - 1
-    px = clamp_int(player_x-1, 0, PLAY_W-1)
-    grid[py][px] = PLAYER_CHAR
-    # write rows
-    for row in grid:
-        sys.stdout.write("|")
-        sys.stdout.write("".join(row))
-        sys.stdout.write("|\n")
-    sys.stdout.write("+" + "-" * PLAY_W + "+\n")
-    sys.stdout.write(" Press Q to quit. Press P to pause.                \n")
-    sys.stdout.flush()
-
-def game_loop():
-    global last_input, player_x, running
-    last_time = time.time()
-    try:
-        while running:
-            t0 = time.time()
-            dt = t0 - last_time
-            last_time = t0
-            # process input
-            if last_input:
-                li = last_input
-                last_input = None
-                if li == "LEFT":
-                    player_x = clamp_int(player_x-1, 1, PLAY_W)
-                elif li == "RIGHT":
-                    player_x = clamp_int(player_x+1, 1, PLAY_W)
-                elif li == "STAY":
-                    pass
-            # update
-            update_game(dt)
-            # render
-            clear_screen()
-            render()
-            # frame timing
-            t1 = time.time()
-            elapsed = t1 - t0
-            sleep = max(0, TICK - elapsed)
-            time.sleep(sleep)
-    except KeyboardInterrupt:
-        running = False
-
-def show_game_over():
-    clear_screen()
-    sys.stdout.write("\n\n")
-    sys.stdout.write("  ===== GAME OVER =====\n")
-    sys.stdout.write(f"   Final Score: {score}\n")
-    sys.stdout.write("   Thanks for playing Funnay Dodge!\n\n")
-    sys.stdout.flush()
-
-def main():
-    global running
-    clear_screen()
-    hide_cursor()
-    sys.stdout.write("Welcome to Funnay Dodge (terminal edition)!\n")
-    sys.stdout.write("Controls: A/D or ←/→ to move, S stay, P pause, Q quit\n")
-    sys.stdout.write("Press Enter to start...")
-    sys.stdout.flush()
-    try:
-        # wait for Enter
-        if IS_WIN:
-            while True:
-                if msvcrt.kbhit():
-                    ch = msvcrt.getwch()
-                    if ch == "\r":
-                        break
-                time.sleep(0.05)
+                    st.session_state.score += 3
+            # otherwise it falls past
         else:
-            _ = sys.stdin.readline()
-        reset_game()
-        it = threading.Thread(target=input_thread, daemon=True)
-        it.start()
-        game_loop()
-    finally:
-        running = False
-        show_cursor()
-        show_game_over()
+            new_objs.append(obj)
+    st.session_state.objects = new_objs
+    if st.session_state.lives <= 0:
+        st.session_state.running = False
 
-if __name__ == "__main__":
-    main()
+# Auto Play loop (limited steps)
+if st.session_state.auto and st.session_state.running:
+    # run a short auto-loop but keep Streamlit responsive
+    steps = 12
+    placeholder = st.empty()
+    for i in range(steps):
+        # small AI: move toward nearest good or away from nearest hazard
+        objs = list(st.session_state.objects)
+        # choose target
+        target_dx = 0
+        nearest_good = None
+        nearest_hazard = None
+        for o in objs:
+            if o["ch"] == GOOD_CHAR:
+                if nearest_good is None or o["y"] < nearest_good["y"]:
+                    nearest_good = o
+            else:
+                if nearest_hazard is None or o["y"] < nearest_hazard["y"]:
+                    nearest_hazard = o
+        if nearest_good:
+            if nearest_good["x"] < st.session_state.player_x:
+                target_dx = -1
+            elif nearest_good["x"] > st.session_state.player_x:
+                target_dx = 1
+        elif nearest_hazard:
+            # try to move away from hazard's x if it's close
+            if abs(nearest_hazard["x"] - st.session_state.player_x) <= 2:
+                if nearest_hazard["x"] <= st.session_state.player_x:
+                    target_dx = 1
+                else:
+                    target_dx = -1
+        # apply movement
+        st.session_state.player_x = max(1, min(PLAY_W, st.session_state.player_x + target_dx))
+        step_game()
+        # render interim UI
+        render_box = placeholder.container()
+        with render_box:
+            st.markdown(render_playfield(), unsafe_allow_html=True)
+            st.write(f"Score: {st.session_state.score}   Lives: {st.session_state.lives}   Tick: {st.session_state.tick_count}")
+        time.sleep(0.12)
+        if not st.session_state.running:
+            break
+    placeholder.empty()
+else:
+    # if not auto, but Step clicked in sidebar, advance one tick
+    if st.session_state.tick_count > 0:
+        # ensure we only process one step per click (decrement tick_count)
+        # Actually tick_count used to count steps; we process one step here per request.
+        step_game()
+        # reduce tick_count so consecutive Step clicks work
+        # (we don't strictly need to decrement; it's just a click counter)
+        st.session_state.tick_count = 0
+
+# Render playfield using markdown with monospace and simple box
+def render_playfield():
+    grid = [[EMPTY_CHAR for _ in range(PLAY_W)] for _ in range(PLAY_H)]
+    for obj in st.session_state.objects:
+        x = int(obj["x"] - 1)
+        y = int(obj["y"] - 1)
+        if 0 <= x < PLAY_W and 0 <= y < PLAY_H:
+            grid[y][x] = obj["ch"]
+    # player row
+    py = PLAY_H - 1
+    px = int(st.session_state.player_x - 1)
+    if 0 <= px < PLAY_W:
+        grid[py][px] = PLAYER_CHAR
+    # build string
+    lines = []
+    lines.append("+" + "-" * PLAY_W + "+")
+    for row in grid:
+        lines.append("|" + "".join(row) + "|")
+    lines.append("+" + "-" * PLAY_W + "+")
+    return "```\n" + "\n".join(lines) + "\n```"
+
+# main display
+st.header("Funnay Dodge — Streamlit Edition")
+st.markdown(render_playfield(), unsafe_allow_html=True)
+st.write(f"Score: {st.session_state.score}   Lives: {st.session_state.lives}   Tick: {st.session_state.tick_count}")
+
+# Movement buttons in main area
+c1, c2, c3 = st.columns([1,1,1])
+if c1.button("⭠ Move Left"):
+    st.session_state.player_x = max(1, st.session_state.player_x - 1)
+if c3.button("Move Right ⭢"):
+    st.session_state.player_x = min(PLAY_W, st.session_state.player_x + 1)
+if c2.button("Step"):
+    step_game()
+
+if not st.session_state.running:
+    st.error("Game Over! Press Reset Game to play again.")
+else:
+    st.info("Use Step or Auto Play. Controls in the sidebar.")
+
+# small footer
+st.caption("Made with pure Python + Streamlit. Enjoy!")
