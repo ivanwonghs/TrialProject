@@ -1,6 +1,3 @@
-import streamlit as st
-
-st.write("ISOM5240")
 
 #!/usr/bin/env python3
 """
@@ -10,11 +7,12 @@ Controls:
  - a / A / left-arrow  : move left
  - d / D / right-arrow : move right
  - s / S               : stay (no movement)
+ - p / P               : pause/unpause
  - q / Q               : quit
 
 Goal:
  - Catch goodies 'o' to gain points.
- - Dodge hazards 'X' (losing a life if hit).
+ - Dodge hazards 'X' (lose a life if hit).
  - Survive as long as possible. Difficulty increases over time.
 
 Notes:
@@ -23,11 +21,15 @@ Notes:
  - No curses dependency; simple drawing with ANSI escape codes.
 """
 
-from __future__ import annotations
 import sys
 import time
 import random
 import threading
+
+import streamlit as st
+
+st.write("ISOM5240")
+
 
 # Platform-specific single-key input
 IS_WIN = sys.platform.startswith("win")
@@ -103,7 +105,7 @@ def get_terminal_size():
 # Game constants
 WIDTH, HEIGHT = get_terminal_size()
 PLAY_H = max(10, HEIGHT - 6)
-PLAY_W = min(80, WIDTH - 4)
+PLAY_W = min(80, max(40, WIDTH - 4))
 FPS = 12
 TICK = 1.0 / FPS
 
@@ -121,12 +123,15 @@ lives = 3
 level = 1
 running = True
 paused = False
-objects = []  # each is dict: {'x':int,'y':int,'ch':str,'speed':float}
+objects = []  # each is dict: {'x':int,'y':int,'ch':str,'speed':float,'acc':float}
 spawn_timer = 0.0
 spawn_interval = 0.9
 
 # Input state
 last_input = None
+
+def clamp_int(v, a, b):
+    return max(a, min(b, v))
 
 def reset_game():
     global player_x, score, lives, level, objects, spawn_timer, spawn_interval, running, paused
@@ -146,7 +151,7 @@ def input_thread():
     global last_input, running, paused
     try:
         while running:
-            ch = get_char_blocking(timeout=0.1)
+            ch = get_char_blocking(timeout=0.08)
             if not ch:
                 continue
             # normalize arrow keys and letters
@@ -170,13 +175,12 @@ def input_thread():
                 else:
                     last_input = None
     except Exception:
-        # input errors: exit input loop
         running = False
 
 def spawn_object():
     # spawn either hazard or good object at top row (y=1)
     typ = random.random()
-    if typ < 0.16:
+    if typ < 0.18:
         ch = GOOD_CHAR
         speed = random.uniform(0.35, 0.7)
     else:
@@ -200,22 +204,22 @@ def update_game(dt):
     spawn_interval = max(0.25, 0.9 - (level-1)*0.06)
     # update objects
     remove = []
-    for obj in objects:
+    for obj in list(objects):
         obj["acc"] += obj["speed"] * dt * 60  # scale by tick rate
         if obj["acc"] >= 1.0:
             step = int(obj["acc"])
             obj["y"] += step
             obj["acc"] -= step
         # collision with player?
-        if obj["y"] >= PLAY_H - 1:
+        if obj["y"] >= PLAY_H:
             if abs(obj["x"] - player_x) <= 0:
-                # hit
+                # hit player
                 if obj["ch"] == HAZARD_CHAR:
                     lives -= 1
                 else:
                     score += 3
             else:
-                # missed: hazard disappears, good disappears (no effect)
+                # missed: hazards disappear; goodies fall past
                 pass
             remove.append(obj)
     for r in remove:
@@ -228,9 +232,9 @@ def update_game(dt):
 def render():
     # draw frame
     move_to(1,1)
-    sys.stdout.write("\n")  # ensure we're at top-left
+    sys.stdout.write("\n")  # ensure top-left
     # top status
-    sys.stdout.write(f" Funnay Dodge — Score: {score}   Lives: {lives}   Level: {level}    (A/D or ←/→ to move, S to stay, Q to quit)\n")
+    sys.stdout.write(f" Funnay Dodge — Score: {score}   Lives: {lives}   Level: {level}    (A/D or ←/→ to move, S to stay, P pause, Q quit)\n")
     # playfield border
     sys.stdout.write("+" + "-" * PLAY_W + "+\n")
     # build rows
@@ -253,9 +257,6 @@ def render():
     sys.stdout.write("+" + "-" * PLAY_W + "+\n")
     sys.stdout.write(" Press Q to quit. Press P to pause.                \n")
     sys.stdout.flush()
-
-def clamp_int(v, a, b):
-    return max(a, min(b, v))
 
 def game_loop():
     global last_input, player_x, running
