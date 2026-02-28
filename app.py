@@ -3,7 +3,7 @@ from PIL import Image
 import streamlit as st
 
 # Streamlit UI
-st.heads("Title: Age Classification using ViT")
+st.header("Title: Age Classification using ViT")
 
 # Load the age classification pipeline
 # The code below should be placed in the main part of the program
