@@ -3,7 +3,7 @@ from PIL import Image
 import streamlit as st
 
 # Streamlit UI
-print("Title: Age Classification using ViT")
+st.write("Title: Age Classification using ViT")
 
 # Load the age classification pipeline
 # The code below should be placed in the main part of the program
@@ -15,11 +15,11 @@ image_name = Image.open(image_name).convert("RGB")
 
 # Classify age
 age_predictions = age_classifier(image_name)
-print(age_predictions)
+st.write(age_predictions)
 age_predictions = sorted(age_predictions, key=lambda x: x['score'], reverse=True)
 
 # Display results
-print("Predicted Age Range:")
-print(f"Age range: {age_predictions[0]['label']}")
+st.write("Predicted Age Range:")
+st.write(f"Age range: {age_predictions[0]['label']}")
 
 st.write("Done")
