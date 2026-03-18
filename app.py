@@ -11,6 +11,7 @@ def sentiment(user_input):
     st.write(f"Confidence: {confidence:.2f}")
         
 def translate(user_input):
+    translate_pipeline = pipeline("text-generation", model="Qwen/Qwen3-0.6B")
     # The model name is known from earlier cells
     model_name = "Qwen/Qwen3-0.6B"
     # Initialize the tokenizer
@@ -19,7 +20,7 @@ def translate(user_input):
         {"role": "user", "content": "Just give me '"+user_input+"' in English purely in string charater"},
     ]
      # Apply chat template with thinking disabled
-    # tokenize=False is important here as pipe expects string input now, not tokenized IDs
+    # tokenize=False is important here as translate_pipeline expects string input now, not tokenized IDs
     text_input = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
@@ -27,8 +28,8 @@ def translate(user_input):
         enable_thinking=False # Disable thinking mode
     )
     # Call the pipeline with the pre-processed text and desired max_new_tokens
-    # The 'pipe' object is assumed to be defined in a previous cell (drax9z03oF-i)
-    outputs = pipe(text_input, max_new_tokens=32768)
+    # The 'translate_pipeline' object is assumed to be defined in a previous cell (drax9z03oF-i)
+    outputs = translate_pipeline(text_input, max_new_tokens=32768)
     generated_text_full = outputs[0]['generated_text']
     # Define the marker after which the actual response starts
     marker_end_think = "</think>\n\n"
