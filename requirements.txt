@@ -1,4 +1,7 @@
 streamlit
-transformers==4.34.0
-torch==2.0.0
-Pillow
+transformers>=4.35.0
+tokenizers
+accelerate
+peft
+safetensors
+torch
