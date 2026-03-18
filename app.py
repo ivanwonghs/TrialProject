@@ -88,7 +88,5 @@ def main():
             # Once done, remove the status/loading message
             status_placeholder.success("Analysis complete.")
 
-        # Optional: collapse the spinner by doing nothing else; results are shown in placeholders
-
 if __name__ == "__main__":
     main()
