@@ -57,7 +57,7 @@ def translate(user_input: str, placeholder):
     if start_of_response_idx != -1:
         raw_response = generated_text_full[start_of_response_idx + len(marker_end_think):]
     else:
-        # fallback if marker not found, take whole generated text
+        # fallback if marker not found, take whole generated textww
         raw_response = generated_text_full
 
     extracted_response = raw_response.strip().strip('"')
