@@ -34,6 +34,11 @@ def get_translate_pipeline_and_tokenizer():
 def sentiment(user_input: str, placeholder):
     # placeholder is an st.empty() where results will be written
     pipeline_obj = get_sentiment_pipeline()
+    
+    ##TESTING
+    st.write(pipeline_obj)
+    ##TESTING
+    
     # Run inference (this is where we want the spinner/placeholder to show loading)
     sentiment_result = pipeline_obj(user_input)
     print(sentiment_result)
