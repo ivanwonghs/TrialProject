@@ -78,7 +78,7 @@ def translate(user_input: str, placeholder):
     placeholder.markdown(f"**Meaning in English:** {extracted_response}")
 
 def main():
-    st.title("Multilingual Social Media Product Comment Analyzer\n")
+    st.markdown("###Multilingual Social Media Product Comment Analyzer\n")
     st.divider()
     user_input = st.text_input("Please input the comment you want to analyse:")
 
