@@ -133,8 +133,6 @@ if __name__ == "__main__":
     main()
 
     #TEST
-    st.write("sentiment_result: ")
-    st.write(sentiment_result)
     st.write("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     st.write(pipeline(model="ivanwonghs/multilingual_comment_sentiment_finetuned_on_amazon_reviews_final"))
     st.write(pipeline(model="ivanwonghs/multilingual_comment_sentiment_finetuned_on_amazon_reviews_final")("TTESTING"))
