@@ -11,6 +11,14 @@ def get_sentiment_pipeline():
     global _SENTIMENT_PIPELINE
     if _SENTIMENT_PIPELINE is None:
         _SENTIMENT_PIPELINE = pipeline(model="ivanwonghs/multilingual_comment_sentiment_finetuned_on_amazon_reviews", task="text-classification")
+       
+        ## Testing 
+        st.divider()
+        st.markdown("## _SENTIMENT_PIPELINE RESULT: ")
+        st.write(_SENTIMENT_PIPELINE)
+        st.divider()
+        ## Testing
+    
     return _SENTIMENT_PIPELINE
 
 def get_translate_pipeline_and_tokenizer():
