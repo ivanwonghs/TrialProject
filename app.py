@@ -4,7 +4,11 @@ from typing import Optional
 
 st.set_page_config(page_title="Multilingual Comment Analyzer", layout="wide")
 
-# Cached pipeline dictionaries
+# Hard-coded model IDs (no user selection)
+_TRANSLATE_MODEL_ID = "Qwen/Qwen3-0.6B"
+_SENTIMENT_MODEL_ID = "ivanwonghs/multilingual_comment_sentiment_finetuned_on_amazon_reviews_final"
+
+# Cached pipeline dictionaries (keyed by model id)
 _SENTIMENT_PIPELINES: dict = {}
 _TRANSLATE_PIPELINES: dict = {}
 _TRANSLATE_TOKENIZERS: dict = {}
@@ -16,51 +20,59 @@ def get_sentiment_pipeline_cached(model_name: str):
     return _SENTIMENT_PIPELINES[model_name]
 
 @st.cache_resource
-def get_translate_pipeline_and_tokenizer_cached(model_name: str = "Qwen/Qwen3-0.6B"):
+def get_translate_pipeline_and_tokenizer_cached(model_name: str = _TRANSLATE_MODEL_ID):
     if model_name not in _TRANSLATE_PIPELINES:
         _TRANSLATE_PIPELINES[model_name] = pipeline("text-generation", model=model_name)
     if model_name not in _TRANSLATE_TOKENIZERS:
         _TRANSLATE_TOKENIZERS[model_name] = AutoTokenizer.from_pretrained(model_name)
     return _TRANSLATE_PIPELINES[model_name], _TRANSLATE_TOKENIZERS[model_name]
 
-def sentiment(user_input: str, placeholder, sentiment_model_name: str):
-    pipeline_obj = get_sentiment_pipeline_cached(sentiment_model_name)
-    sentiment_result = pipeline_obj(user_input)
-    sentiment_label = sentiment_result[0]["label"]
-    confidence = sentiment_result[0]["score"]
-    placeholder.markdown(f"**Sentiment ({sentiment_model_name}):** {sentiment_label} ({confidence:.2%} confidence)")
-
-def translate(user_input: str, placeholder, translate_model_name: str = "Qwen/Qwen3-0.6B"):
-    translate_pipeline, tokenizer = get_translate_pipeline_and_tokenizer_cached(model_name=translate_model_name)
-
-    content_to_translate = "Translate the following into English: '" + user_input + "'"
-
-    messages = [
-        {"role": "user", "content": content_to_translate},
-    ]
-
+def sentiment(user_input: str, placeholder):
     try:
-        text_input = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False
-        )
+        pipeline_obj = get_sentiment_pipeline_cached(_SENTIMENT_MODEL_ID)
+        sentiment_result = pipeline_obj(user_input)
+        sentiment_label = sentiment_result[0].get("label", "UNKNOWN")
+        confidence = sentiment_result[0].get("score", 0.0)
+        placeholder.markdown(f"**Sentiment:** {sentiment_label} ({confidence:.2%} confidence)")
     except Exception:
-        text_input = content_to_translate
+        # Sanitize errors shown to user (no internal names, no tracebacks)
+        placeholder.error("Sentiment analysis failed. Please try again later.")
 
-    outputs = translate_pipeline(text_input, max_new_tokens=1024)
-    generated_text_full = outputs[0].get('generated_text', "")
+def translate(user_input: str, placeholder):
+    try:
+        translate_pipeline, tokenizer = get_translate_pipeline_and_tokenizer_cached(_TRANSLATE_MODEL_ID)
 
-    marker_end_think = "</think>\n\n"
-    start_of_response_idx = generated_text_full.rfind(marker_end_think)
-    if start_of_response_idx != -1:
-        raw_response = generated_text_full[start_of_response_idx + len(marker_end_think):]
-    else:
-        raw_response = generated_text_full
+        content_to_translate = "Translate the following into English: '" + user_input + "'"
 
-    extracted_response = raw_response.strip().strip('"')
-    placeholder.markdown(f"**Meaning in English ({translate_model_name}):** {extracted_response}")
+        messages = [
+            {"role": "user", "content": content_to_translate},
+        ]
+
+        # Use tokenizer's chat template if available; otherwise fall back to raw content
+        try:
+            text_input = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False
+            )
+        except Exception:
+            text_input = content_to_translate
+
+        outputs = translate_pipeline(text_input, max_new_tokens=1024)
+        generated_text_full = outputs[0].get('generated_text', "")
+
+        marker_end_think = "</think>\n\n"
+        start_of_response_idx = generated_text_full.rfind(marker_end_think)
+        if start_of_response_idx != -1:
+            raw_response = generated_text_full[start_of_response_idx + len(marker_end_think):]
+        else:
+            raw_response = generated_text_full
+
+        extracted_response = raw_response.strip().strip('"')
+        placeholder.markdown(f"**Meaning in English:** {extracted_response}")
+    except Exception:
+        placeholder.error("Translation failed. Please try again later.")
 
 def main():
     st.markdown("## Multilingual Social Media Product Comment Analyzer\n")
@@ -95,40 +107,18 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Split layout using Streamlit columns (valid specs only)
+    # Columns layout (valid column specs)
     left_col, divider_col, right_col = st.columns([1, 0.02, 3])
 
-    # Left pane content (controls)
+    # Left pane: brief controls area (no model selections)
     with left_col:
         st.markdown("### Controls")
-        st.caption("Change settings here, then click Apply. Use Analyze to run with the active configuration.")
+        st.caption("Click Apply to confirm the fixed configuration. Click Analyze to run the analysis on the comment.")
 
-        model_choice = st.selectbox(
-            "Translation model",
-            options=[
-                "Qwen/Qwen3-0.6B",
-                # add other translation models here
-            ],
-            index=0,
-            help="Select the model used for translation/generation. Changes take effect after clicking Apply."
-        )
-
-        sentiment_choice = st.selectbox(
-            "Sentiment model",
-            options=[
-                "ivanwonghs/multilingual_comment_sentiment_finetuned_on_amazon_reviews_final",
-                # add other sentiment models here
-            ],
-            index=0,
-            help="Select the model used for sentiment classification. Changes take effect after clicking Apply."
-        )
-
-        function_choice = st.selectbox(
-            "Function",
-            options=["Both", "Sentiment", "Translate"],
-            index=0,
-            help="Select which operation(s) to run on the comment. Changes take effect after clicking Apply."
-        )
+        st.markdown("**Active configuration (fixed):**")
+        st.markdown(f"- Translation model: `{_TRANSLATE_MODEL_ID}`")
+        st.markdown(f"- Sentiment model: `{_SENTIMENT_MODEL_ID}`")
+        st.markdown(f"- Function: Both (Sentiment + Translate)")
 
         st.markdown("#### Supported languages")
         st.markdown(
@@ -148,14 +138,12 @@ def main():
             """
         )
 
-        # Apply button sets the chosen configuration in session state
         if st.button("Apply"):
-            st.session_state["applied_translate_model"] = model_choice
-            st.session_state["applied_sentiment_model"] = sentiment_choice
-            st.session_state["applied_function"] = function_choice
-            st.success("Configuration applied. Use Analyze to run with this configuration.")
+            # Simple confirmation; nothing internal is displayed
+            st.session_state["applied"] = True
+            st.success("Configuration applied.")
 
-    # Divider column: draw a full-height divider using HTML/CSS hack
+    # Divider: full-viewport vertical line
     with divider_col:
         st.markdown(
             """
@@ -164,13 +152,11 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # Right pane content (input and results)
+    # Right pane: input and results
     with right_col:
-        translate_model_applied = st.session_state.get("applied_translate_model", model_choice)
-        sentiment_model_applied = st.session_state.get("applied_sentiment_model", sentiment_choice)
-        function_applied = st.session_state.get("applied_function", function_choice)
-
-        st.markdown(f"**Active configuration:** Translation model: `{translate_model_applied}` — Sentiment model: `{sentiment_model_applied}` — Function: `{function_applied}`")
+        applied = st.session_state.get("applied", False)
+        if not applied:
+            st.info("Default configuration is active. Click Apply to confirm settings, or click Analyze to run now.")
 
         user_input = st.text_input("Please input the comment you want to analyse:")
 
@@ -186,17 +172,11 @@ def main():
                 with st.spinner("Analyzing comment — this may take a while..."):
                     status_placeholder.info("Loading models and running inference. Please wait...")
 
-                    if function_applied in ("Both", "Sentiment"):
-                        try:
-                            sentiment(user_input, sentiment_placeholder, sentiment_model_name=sentiment_model_applied)
-                        except Exception as e:
-                            sentiment_placeholder.error(f"Sentiment error: {e}")
+                    # Run sentiment
+                    sentiment(user_input, sentiment_placeholder)
 
-                    if function_applied in ("Both", "Translate"):
-                        try:
-                            translate(user_input, translate_placeholder, translate_model_name=translate_model_applied)
-                        except Exception as e:
-                            translate_placeholder.error(f"Translate error: {e}")
+                    # Run translation
+                    translate(user_input, translate_placeholder)
 
                     status_placeholder.success("Analysis complete.")
 
