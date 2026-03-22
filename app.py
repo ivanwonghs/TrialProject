@@ -4,7 +4,7 @@ from typing import Optional
 
 st.set_page_config(page_title="Multilingual Comment Analyzer", layout="wide")
 
-# Hard-coded model IDs (no user selection, not displayed as internals)
+# Hard-coded model IDs (displayed to users in About section)
 _TRANSLATE_MODEL_ID = "Qwen/Qwen3-0.6B"
 _SENTIMENT_MODEL_ID = "ivanwonghs/multilingual_comment_sentiment_finetuned_on_amazon_reviews"
 
@@ -76,71 +76,112 @@ def translate(user_input: str, placeholder):
 def main():
     st.markdown("## Multilingual Social Media Product Comment Analyzer\n")
 
+    # Page CSS: two-column layout, left column fixed width, right column fills remaining space,
+    # and a full-height vertical divider between them.
     st.markdown(
         """
         <style>
-        /* Full viewport height layout with a centered right pane */
-        .app-split {
+        .layout {
             display: flex;
             min-height: 100vh;
-            gap: 16px;
-            align-items: stretch;
+            gap: 24px;
+            align-items: flex-start;
+            padding-top: 12px;
         }
-        .right-pane {
-            flex: 1 1 auto;
-            padding: 24px;
+        .left {
+            width: 360px;
+            padding: 16px;
             box-sizing: border-box;
-            max-width: 1200px;
-            margin: 0 auto;
+            border-right: 1px solid rgba(0,0,0,0.08);
+        }
+        .right {
+            flex: 1 1 auto;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        /* Responsive: stack on small screens */
+        @media (max-width: 900px) {
+            .layout {
+                flex-direction: column;
+            }
+            .left {
+                width: auto;
+                border-right: none;
+                border-bottom: 1px solid rgba(0,0,0,0.08);
+            }
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Only the right pane (centered)
-    with st.container():
-        st.markdown('<div class="app-split">', unsafe_allow_html=True)
-        right_col = st.columns([1])[0]
+    # Render the two-column layout as HTML containers and use streamlit columns for placing Streamlit widgets
+    st.markdown('<div class="layout">', unsafe_allow_html=True)
 
-        with right_col:
-            # New clear section that tells the user which models/functions are used
-            st.markdown("### About this analyzer")
-            st.markdown(
-                f"- Translation model: `{_TRANSLATE_MODEL_ID}`  \n"
-                f"- Sentiment model: `{_SENTIMENT_MODEL_ID}`  \n"
-                "- Function: Both (Sentiment + Translate)"
-            )
-            st.write("")  # spacing
+    # Left column (About + Supported languages)
+    left_col, right_col = st.columns([0.28, 0.72])
+    with left_col:
+        st.markdown('<div class="left">', unsafe_allow_html=True)
+        st.markdown("### About this analyzer")
+        st.markdown(f"- Translation model: **{_TRANSLATE_MODEL_ID}**  ")
+        st.markdown(f"- Sentiment model: **{_SENTIMENT_MODEL_ID}**  ")
+        st.markdown(f"- Function: **Both (Sentiment + Translate)**")
+        st.write("")  # spacing
 
-            st.markdown(
-                """
-                Enter a comment below and click Analyze. The app will return a sentiment label with confidence and an English translation/meaning.
-                """
-            )
+        st.markdown("#### Supported languages")
+        st.markdown(
+            """
+            - English
+            - Arabic
+            - German
+            - Spanish
+            - French
+            - Japanese
+            - Chinese
+            - Indonesian
+            - Hindi
+            - Italian
+            - Malay
+            - Portuguese
+            """
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            user_input = st.text_input("Please input the comment you want to analyse:")
+    # Right column (Input + Analyze + Results)
+    with right_col:
+        st.markdown('<div class="right">', unsafe_allow_html=True)
+        st.markdown(
+            """
+            Enter a comment below and click Analyze. The app will return a sentiment label with confidence and an English translation/meaning.
+            """
+        )
 
-            if st.button("Analyze"):
-                if not user_input:
-                    st.warning("Please enter a comment to analyze.")
-                else:
-                    status_placeholder = st.empty()
-                    sentiment_placeholder = st.empty()
-                    translate_placeholder = st.empty()
+        # Input and Analyze button
+        user_input = st.text_input("Please input the comment you want to analyse:")
 
-                    with st.spinner("Analyzing comment — this may take a while..."):
-                        status_placeholder.info("Loading models and running inference. Please wait...")
+        # Placeholders for outputs so they appear below the input
+        status_placeholder = st.empty()
+        sentiment_placeholder = st.empty()
+        translate_placeholder = st.empty()
 
-                        # Run sentiment
-                        sentiment(user_input, sentiment_placeholder)
+        if st.button("Analyze"):
+            if not user_input:
+                st.warning("Please enter a comment to analyze.")
+            else:
+                with st.spinner("Analyzing comment — this may take a while..."):
+                    status_placeholder.info("Running analysis. Please wait...")
 
-                        # Run translation
-                        translate(user_input, translate_placeholder)
+                    # Run sentiment
+                    sentiment(user_input, sentiment_placeholder)
 
-                        status_placeholder.success("Analysis complete.")
+                    # Run translation
+                    translate(user_input, translate_placeholder)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+                    status_placeholder.success("Analysis complete.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
